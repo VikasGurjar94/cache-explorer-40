@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Moon, Sun } from 'lucide-react';
-import { ProtocolType, Operation } from '@/lib/simulator/types';
+import { ProtocolType, Operation, BusTransactionType } from '@/lib/simulator/types';
 import { createSimulatorState, addOperation, executeNextStep } from '@/lib/simulator/engine';
 import { SimulatorControls } from '@/components/SimulatorControls';
 import { OperationInput } from '@/components/OperationInput';
@@ -8,6 +8,8 @@ import { CacheTable } from '@/components/CacheTable';
 import { MemoryView } from '@/components/MemoryView';
 import { LogPanel } from '@/components/LogPanel';
 import { TimelinePanel } from '@/components/TimelinePanel';
+import { BusVisualizer } from '@/components/BusVisualizer';
+import { SCENARIO_PRESETS } from '@/lib/simulator/presets';
 
 const Index = () => {
   const [state, setState] = useState(() => createSimulatorState('MSI', 2));
@@ -19,6 +21,14 @@ const Index = () => {
     if (typeof window === 'undefined') return true;
     return window.localStorage.getItem('learningMode') !== 'false';
   });
+  const [activePreset, setActivePreset] = useState<string | null>(null);
+  const [presetMessage, setPresetMessage] = useState<string>('');
+  const [activeBusSignal, setActiveBusSignal] = useState<{
+    initiator: number;
+    type: BusTransactionType;
+    recipients: number[];
+    invalidations: number[];
+  } | null>(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -78,6 +88,24 @@ const Index = () => {
     });
   }, []);
 
+  const handleLoadPreset = useCallback((presetId: string) => {
+    setState((s) => {
+      const preset = SCENARIO_PRESETS.find((p) => p.id === presetId);
+      if (!preset) return s;
+      if (preset.supportedProtocols && !preset.supportedProtocols.includes(s.protocol)) {
+        setPresetMessage(`Preset "${preset.title}" is not fully supported on ${s.protocol}.`);
+        return s;
+      }
+      setActivePreset(presetId);
+      setPresetMessage(`Loaded preset: ${preset.title}`);
+      const next = createSimulatorState(s.protocol, s.coreCount);
+      return {
+        ...next,
+        operationQueue: [...preset.operations],
+      };
+    });
+  }, []);
+
   const handleStepBackward = useCallback(() => {
     setState((s) => ({
       ...s,
@@ -105,6 +133,26 @@ const Index = () => {
   const handleSelectTimelineItem = useCallback((index: number) => {
     setState((s) => ({ ...s, timelineIndex: index }));
   }, []);
+
+  useEffect(() => {
+    const lastLog = state.logs[state.logs.length - 1];
+    if (!lastLog) return;
+    const busTx = lastLog.busTransactions[lastLog.busTransactions.length - 1];
+    if (!busTx) {
+      setActiveBusSignal(null);
+      return;
+    }
+    const invalidations = lastLog.stateChanges
+      .filter((c) => c.coreId !== lastLog.operation.coreId && c.newState === 'I')
+      .map((c) => c.coreId);
+    const recipients = Array.from(new Set(lastLog.stateChanges.map((c) => c.coreId).filter((id) => id !== lastLog.operation.coreId)));
+    setActiveBusSignal({
+      initiator: lastLog.operation.coreId,
+      type: busTx.type,
+      recipients,
+      invalidations,
+    });
+  }, [state.logs]);
 
   const displaySnapshot = state.history[state.timelineIndex] ?? state.history[0];
   const displayCaches = displaySnapshot?.caches ?? state.caches;
@@ -183,7 +231,39 @@ const Index = () => {
             onRunAll={handleRunAll}
             hasOperations={state.operationQueue.length > 0}
           />
+
+          <div className="mt-4 border-t border-border pt-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div>
+                <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Scenario Presets</div>
+                <p className="text-[11px] text-muted-foreground">Load teaching scenarios quickly.</p>
+              </div>
+              <div className="text-xs font-mono text-primary">Selected: {activePreset || 'None'}</div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {SCENARIO_PRESETS.map((preset) => {
+                const enabled = !preset.supportedProtocols || preset.supportedProtocols.includes(state.protocol);
+                return (
+                  <button
+                    key={preset.id}
+                    onClick={() => handleLoadPreset(preset.id)}
+                    disabled={!enabled}
+                    className={`rounded-lg border p-2 text-left text-xs font-mono ${enabled ? 'border-border bg-background hover:border-primary' : 'border-slate-300 bg-slate-100 text-muted-foreground cursor-not-allowed'}`}
+                  >
+                    <div className="font-semibold text-xs">{preset.title}</div>
+                    <div className="text-[11px] text-muted-foreground mt-1">{preset.description}</div>
+                    <div className="mt-1 text-[10px] text-muted-foreground">Ops: {preset.operations.map((o) => `${o.type}${o.value !== undefined ? `(${o.value})` : ''} ${o.address} C${o.coreId}`).join(' → ')}</div>
+                  </button>
+                );
+              })}
+            </div>
+            {presetMessage && <div className="mt-2 text-[11px] font-mono text-green-600">{presetMessage}</div>}
+          </div>
         </div>
+
+        {/* <div className="rounded-2xl border border-border bg-card p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-4">
+          <BusVisualizer coreCount={state.coreCount} activeSignal={activeBusSignal} />
+        </div> */}
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
           <div className="lg:col-span-3 space-y-4">
@@ -196,7 +276,7 @@ const Index = () => {
           </div>
           <div className="lg:col-span-2 space-y-3">
             <div className="h-[320px]">
-              <LogPanel logs={state.history[state.timelineIndex]?.logs ?? state.logs} learningMode={learningMode} protocol={state.protocol} />
+              <LogPanel logs={displayLogs} learningMode={learningMode} protocol={state.protocol} />
             </div>
             <TimelinePanel
               history={state.history}

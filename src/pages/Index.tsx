@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Moon, Sun } from 'lucide-react';
 import { ProtocolType, Operation } from '@/lib/simulator/types';
 import { createSimulatorState, addOperation, executeNextStep } from '@/lib/simulator/engine';
 import { SimulatorControls } from '@/components/SimulatorControls';
@@ -6,9 +7,37 @@ import { OperationInput } from '@/components/OperationInput';
 import { CacheTable } from '@/components/CacheTable';
 import { MemoryView } from '@/components/MemoryView';
 import { LogPanel } from '@/components/LogPanel';
+import { TimelinePanel } from '@/components/TimelinePanel';
 
 const Index = () => {
   const [state, setState] = useState(() => createSimulatorState('MSI', 2));
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window === 'undefined') return 'light';
+    return (window.localStorage.getItem('theme') as 'light' | 'dark') || 'light';
+  });
+  const [learningMode, setLearningMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    return window.localStorage.getItem('learningMode') !== 'false';
+  });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    window.localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    window.localStorage.setItem('learningMode', learningMode ? 'true' : 'false');
+  }, [learningMode]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+  }, []);
+
+  const toggleLearningMode = useCallback(() => {
+    setLearningMode((prev) => !prev);
+  }, []);
+
+  const themeLabel = useMemo(() => (theme === 'light' ? 'Switch to dark' : 'Switch to light'), [theme]);
 
   const handleProtocolChange = useCallback((p: ProtocolType) => {
     setState(createSimulatorState(p, state.coreCount));
@@ -49,21 +78,92 @@ const Index = () => {
     });
   }, []);
 
+  const handleStepBackward = useCallback(() => {
+    setState((s) => ({
+      ...s,
+      timelineIndex: Math.max(0, s.timelineIndex - 1),
+    }));
+  }, []);
+
+  const handleStepForward = useCallback(() => {
+    setState((s) => {
+      if (s.timelineIndex < s.history.length - 1) {
+        return { ...s, timelineIndex: s.timelineIndex + 1 };
+      }
+      const next = executeNextStep(s);
+      return next ?? s;
+    });
+  }, []);
+
+  const handleJumpTo = useCallback((index: number) => {
+    setState((s) => ({
+      ...s,
+      timelineIndex: Math.max(0, Math.min(index, s.history.length - 1)),
+    }));
+  }, []);
+
+  const handleSelectTimelineItem = useCallback((index: number) => {
+    setState((s) => ({ ...s, timelineIndex: index }));
+  }, []);
+
+  const displaySnapshot = state.history[state.timelineIndex] ?? state.history[0];
+  const displayCaches = displaySnapshot?.caches ?? state.caches;
+  const displayMemory = displaySnapshot?.memory ?? state.memory;
+  const displayLogs = displaySnapshot?.logs ?? state.logs;
+
   return (
-    <div className="min-h-screen bg-background text-foreground p-4 space-y-4">
-      <div className="max-w-[1400px] mx-auto space-y-4">
-        {/* Header */}
-        <div className="space-y-1">
-          <h1 className="text-xl font-mono font-bold tracking-tight text-foreground">
-            Cache Coherency Simulator
-          </h1>
-          <p className="text-xs font-mono text-muted-foreground">
-            Visualize MSI, MESI & MOESI protocol state transitions in multi-core systems
-          </p>
+    <div className="min-h-screen bg-background text-foreground p-4 sm:p-6 lg:p-8">
+      <div className="relative max-w-[1400px] mx-auto space-y-4">
+        <button
+          type="button"
+          aria-label={themeLabel}
+          onClick={toggleTheme}
+          className="fixed right-4 top-4 z-20 inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:bg-slate-800 dark:text-slate-100"
+        >
+          {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+        </button>
+
+        <div className="rounded-2xl border border-border bg-card/90 p-4 shadow-lg backdrop-blur-sm dark:bg-slate-900/80 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+                Cache Coherency Simulator
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground sm:text-base">
+                Visualize MSI, MESI & MOESI transitions with step-by-step operations.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 items-end">
+              <div className="rounded-xl border border-border bg-secondary px-3 py-2 text-xs font-medium uppercase tracking-[0.2em] text-secondary-foreground">
+                {state.protocol} • {state.coreCount} cores
+              </div>
+              <button
+                type="button"
+                onClick={toggleLearningMode}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${learningMode ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-muted bg-background text-muted-foreground'}`}
+              >
+                Learning Mode: {learningMode ? 'ON' : 'OFF'}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="rounded-xl border border-border bg-background p-3 dark:bg-slate-800">
+              <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Operations queued</div>
+              <div className="mt-1 text-xl font-semibold text-foreground">{state.operationQueue.length}</div>
+            </div>
+            <div className="rounded-xl border border-border bg-background p-3 dark:bg-slate-800">
+              <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Caches</div>
+              <div className="mt-1 text-xl font-semibold text-foreground">{state.caches.length}</div>
+            </div>
+            <div className="rounded-xl border border-border bg-background p-3 dark:bg-slate-800">
+              <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Protocol</div>
+              <div className="mt-1 text-xl font-semibold text-foreground">{state.protocol}</div>
+            </div>
+          </div>
         </div>
 
-        {/* Controls */}
-        <div className="rounded-md border bg-card p-3">
+        <div className="rounded-2xl border border-border bg-card p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-4">
           <SimulatorControls
             protocol={state.protocol}
             coreCount={state.coreCount}
@@ -73,8 +173,7 @@ const Index = () => {
           />
         </div>
 
-        {/* Operation Input */}
-        <div className="rounded-md border bg-card p-3">
+        <div className="rounded-2xl border border-border bg-card p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-4">
           <OperationInput
             coreCount={state.coreCount}
             operationQueue={state.operationQueue}
@@ -86,21 +185,29 @@ const Index = () => {
           />
         </div>
 
-        {/* Main content grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-          {/* Left: Caches + Memory */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
           <div className="lg:col-span-3 space-y-4">
-            <div className={`grid gap-4 ${state.coreCount <= 2 ? 'grid-cols-2' : state.coreCount === 3 ? 'grid-cols-3' : 'grid-cols-2 lg:grid-cols-4'}`}>
-              {state.caches.map((cache) => (
+            <div className={`grid gap-3 ${state.coreCount <= 2 ? 'grid-cols-1 sm:grid-cols-2' : state.coreCount === 3 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4'}`}>
+              {displayCaches.map((cache) => (
                 <CacheTable key={cache.coreId} cache={cache} />
               ))}
             </div>
-            <MemoryView memory={state.memory} />
+            <MemoryView memory={displayMemory} />
           </div>
-
-          {/* Right: Logs */}
-          <div className="lg:col-span-2 min-h-[400px]">
-            <LogPanel logs={state.logs} />
+          <div className="lg:col-span-2 space-y-3">
+            <div className="h-[320px]">
+              <LogPanel logs={state.history[state.timelineIndex]?.logs ?? state.logs} learningMode={learningMode} protocol={state.protocol} />
+            </div>
+            <TimelinePanel
+              history={state.history}
+              selectedIndex={state.timelineIndex}
+              protocol={state.protocol}
+              onSelect={handleSelectTimelineItem}
+              onReset={() => setState(createSimulatorState(state.protocol, state.coreCount))}
+              onStepBackward={handleStepBackward}
+              onStepForward={handleStepForward}
+              onJumpTo={handleJumpTo}
+            />
           </div>
         </div>
       </div>

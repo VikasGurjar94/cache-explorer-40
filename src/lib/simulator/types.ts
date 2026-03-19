@@ -45,6 +45,14 @@ export interface LogEntry {
   description: string[];
 }
 
+export interface SimulatorSnapshot {
+  step: number;
+  caches: CoreCache[];
+  memory: Map<string, number>;
+  logs: LogEntry[];
+  operation: Operation | null;
+}
+
 export interface SimulatorState {
   caches: CoreCache[];
   memory: Map<string, number>;
@@ -53,6 +61,8 @@ export interface SimulatorState {
   stepCount: number;
   protocol: ProtocolType;
   coreCount: number;
+  timelineIndex: number;
+  history: SimulatorSnapshot[];
 }
 
 export const STATE_COLORS: Record<CacheStateValue, string> = {

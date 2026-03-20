@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 
 interface CacheTableProps {
   cache: CoreCache;
+  activeCoreId?: number | null;
 }
 
 function StateBadge({ state }: { state: CacheStateValue }) {
@@ -18,11 +19,15 @@ function StateBadge({ state }: { state: CacheStateValue }) {
   );
 }
 
-export function CacheTable({ cache }: CacheTableProps) {
+export function CacheTable({ cache, activeCoreId = null }: CacheTableProps) {
   const lines = Array.from(cache.lines.values());
 
   return (
-    <div className="rounded-md border bg-card">
+    <div
+      className={`rounded-md border bg-card ${
+        activeCoreId === cache.coreId ? 'ring-2 ring-primary/40 border-primary/50' : ''
+      }`}
+    >
       <div className="px-3 py-2 border-b bg-muted/50">
         <h3 className="font-mono text-sm font-semibold text-foreground">
           Core {cache.coreId}

@@ -32,7 +32,7 @@ export function executeMESI(
         if (other.coreId === coreId) continue;
         const otherLine = getCacheLine(other, address);
         if (otherLine && otherLine.state === 'M') {
-          busTransactions.push({ type: 'Flush', initiator: other.coreId, address });
+          busTransactions.push({ type: 'WriteBack', initiator: other.coreId, address });
           const oldMem = memory.get(address)!;
           memory.set(address, otherLine.value);
           memoryUpdates.push({ address, oldValue: oldMem, newValue: otherLine.value });
@@ -97,7 +97,7 @@ export function executeMESI(
         if (other.coreId === coreId) continue;
         const otherLine = getCacheLine(other, address);
         if (otherLine && otherLine.state === 'M') {
-          busTransactions.push({ type: 'Flush', initiator: other.coreId, address });
+          busTransactions.push({ type: 'WriteBack', initiator: other.coreId, address });
           const oldMem = memory.get(address)!;
           memory.set(address, otherLine.value);
           memoryUpdates.push({ address, oldValue: oldMem, newValue: otherLine.value });

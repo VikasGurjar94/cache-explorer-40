@@ -75,7 +75,11 @@ export function TimelinePanel({
               <button
                 key={`${snapshot.step}-${idx}`}
                 onClick={() => onSelect(idx)}
-                className={`w-full text-left rounded border p-2 text-xs font-mono ${idx === selectedIndex ? 'border-primary bg-primary/10' : 'border-border bg-background hover:border-primary/40'}`}
+                className={`w-full text-left rounded border p-2 text-xs font-mono transition-colors duration-150 ${
+                  idx === selectedIndex
+                    ? 'border-primary bg-primary/10 ring-1 ring-primary/30'
+                    : 'border-border bg-background hover:border-primary/40 hover:bg-primary/5'
+                }`}
               >
                 <div className="flex items-center gap-2">
                   <span className="font-semibold">{idx}</span>

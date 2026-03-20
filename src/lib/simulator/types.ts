@@ -22,7 +22,7 @@ export interface Operation {
   value?: number;
 }
 
-export type BusTransactionType = 'BusRd' | 'BusRdX' | 'BusUpgr' | 'Flush';
+export type BusTransactionType = 'BusRd' | 'BusRdX' | 'BusUpgr' | 'WriteBack';
 
 export interface BusTransaction {
   type: BusTransactionType;

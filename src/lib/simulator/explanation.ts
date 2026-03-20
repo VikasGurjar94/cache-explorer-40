@@ -22,8 +22,8 @@ function explainBusTransaction(tx: LogEntry['busTransactions'][number]): string 
   if (type === 'BusUpgr') {
     return `BusUpgr: Core ${initiator} upgrades its line for a write and invalidates sharers.`;
   }
-  if (type === 'Flush') {
-    return `Flush: A dirty line for ${address} is written back to memory.`;
+  if (type === 'WriteBack') {
+    return `WriteBack: A dirty line for ${address} is written back to memory.`;
   }
   return `Bus action ${type} on ${address}.`;
 }

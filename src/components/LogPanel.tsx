@@ -38,16 +38,30 @@ export function LogPanel({ logs, learningMode, protocol }: LogPanelProps) {
                       Core {log.operation.coreId} {log.operation.type} {log.operation.address}
                       {log.operation.type === 'WRITE' ? ` = ${log.operation.value}` : ''}
                     </span>
-                    <Badge
-                      variant="outline"
-                      className="text-xs ml-auto"
-                      style={{
-                        color: log.hitOrMiss === 'hit' ? STATE_COLORS['E'] : STATE_COLORS['M'],
-                        borderColor: log.hitOrMiss === 'hit' ? STATE_COLORS['E'] : STATE_COLORS['M'],
-                      }}
-                    >
-                      {log.hitOrMiss.toUpperCase()}
-                    </Badge>
+                    <div className="ml-auto flex items-center gap-2">
+                      {log.accessTimeNs !== undefined && (
+                        <Badge
+                          variant="secondary"
+                          className="font-mono text-xs shadow-sm bg-background border"
+                          style={{
+                            color: log.accessTimeNs <= 17 ? STATE_COLORS['E'] : (log.accessTimeNs > 100 ? STATE_COLORS['M'] : STATE_COLORS['O']),
+                            borderColor: log.accessTimeNs <= 17 ? STATE_COLORS['E'] : (log.accessTimeNs > 100 ? STATE_COLORS['M'] : STATE_COLORS['O']),
+                          }}
+                        >
+                          ⏱️ {log.accessTimeNs}ns
+                        </Badge>
+                      )}
+                      <Badge
+                        variant="outline"
+                        className="text-xs"
+                        style={{
+                          color: log.hitOrMiss === 'hit' ? STATE_COLORS['E'] : STATE_COLORS['M'],
+                          borderColor: log.hitOrMiss === 'hit' ? STATE_COLORS['E'] : STATE_COLORS['M'],
+                        }}
+                      >
+                        {log.hitOrMiss.toUpperCase()}
+                      </Badge>
+                    </div>
                   </div>
                   <div className="text-xs font-mono text-muted-foreground pl-2 border-l-2 border-border">
                     {learningMode ? 'Detailed explanation:' : summary}

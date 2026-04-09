@@ -36,14 +36,14 @@ type Speed     = 0.5 | 1 | 2;
  * The speed multiplier divides these, so 2× = half the duration.
  */
 const BASE_TIMING = {
-  DOT_SETTLE:       80,  // pause before dot leaves the sender core
-  CORE_TO_BUS:     650,  // dot travels: core → bus
-  BUS_DWELL:       500,  // dot sits on bus while label pulses
-  BUS_LABEL_REVEAL: 350, // extra wait for the tx label to "sink in"
-  BUS_SETTLE:      150,  // pause after highlights are applied
-  CORE_STEP:       650,  // dot travels: bus → each target core
-  CORE_TAIL:       450,  // pause after reaching the last core
-  TX_GAP:          250,  // gap between back-to-back transactions
+  DOT_SETTLE:       60,  // pause before dot leaves the sender core
+  CORE_TO_BUS:     550,  // dot travels: core → bus
+  BUS_DWELL:       400,  // dot sits on bus while label pulses
+  BUS_LABEL_REVEAL: 250, // extra wait for the tx label to "sink in"
+  BUS_SETTLE:      120,  // pause after highlights are applied
+  CORE_STEP:       550,  // dot travels: bus → each target core
+  CORE_TAIL:       350,  // pause after reaching the last core
+  TX_GAP:          150,  // gap between back-to-back transactions
 } as const;
 
 const SPEED_OPTIONS: { value: Speed; label: string }[] = [
@@ -319,6 +319,10 @@ export function BusVisualizer({
       }
 
       if (!cancelled.current) {
+        // Clear highlights so cores stop blinking when animation finishes
+        setHighlight({ invalidated: [], shared: [], modified: [], sender: null });
+        setBusStage('idle');
+        setActiveTxType(null);
         setPlayState('done');
       }
     })();
@@ -430,8 +434,8 @@ export function BusVisualizer({
       {/* ── Visualization canvas ────────────────────────────────────────────── */}
       <div
         ref={containerRef}
-        className="flex items-center gap-3 justify-center relative select-none"
-        style={{ paddingTop: '2.5rem', paddingBottom: '0.5rem' }}
+        className="flex items-center gap-8 justify-center relative select-none my-6"
+        style={{ paddingTop: '4rem', paddingBottom: '3rem' }}
         role="img"
         aria-label={`Cache coherence bus visualization, ${coreCount} cores`}
       >
@@ -455,17 +459,21 @@ export function BusVisualizer({
             return {};
           })();
 
-          const shouldPulse = isInvalidated || (isSender && busStage !== 'idle');
+          const isTarget = isInvalidated || isModified || isShared;
+          // Only animate-pulse while actively playing to prevent stale blinking
+          const fxClass = (isInvalidated && playState === 'playing') ? 'animate-pulse scale-110 ring-4 ring-rose-500/30' :
+            (isSender && busStage !== 'idle' && playState === 'playing' ? 'scale-110 ring-4 ring-emerald-500/30 drop-shadow-[0_0_8px_rgba(16,185,129,0.5)] z-10' :
+            (isTarget && playState === 'playing' ? 'scale-105 ring-4 ring-blue-500/20' : ''));
 
           return (
-            <div key={i} className="flex flex-col items-center gap-0.5">
+            <div key={i} className="flex flex-col items-center gap-1.5">
               <div
                 ref={(el) => { coreRefs.current[i] = el; }}
                 className={[
-                  'h-11 w-11 rounded-full border-2 flex items-center justify-center',
-                  'font-mono text-xs font-semibold transition-all duration-300',
+                  'h-20 w-20 rounded-full border-4 flex items-center justify-center',
+                  'font-mono text-base font-bold transition-all duration-300 shadow-md',
                   'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-100',
-                  shouldPulse ? 'animate-pulse' : '',
+                  fxClass,
                 ].join(' ')}
                 style={circleStyle}
                 aria-label={`Core ${i}${newState ? `, state ${newState}` : ''}`}
@@ -476,7 +484,7 @@ export function BusVisualizer({
               {/* MESI(O) state badge — coloured per state */}
               <span
                 className={[
-                  'text-[10px] font-mono font-bold transition-colors duration-300',
+                  'text-sm font-mono font-bold transition-colors duration-300',
                   newState
                     ? (STATE_COLORS[newState] ?? 'text-muted-foreground')
                     : 'text-transparent',
@@ -486,7 +494,7 @@ export function BusVisualizer({
                 {newState ?? 'X'}
               </span>
 
-              <span className="text-[10px] text-muted-foreground">Core {i}</span>
+              <span className="text-xs font-medium text-muted-foreground">Core {i}</span>
             </div>
           );
         })}
@@ -495,13 +503,13 @@ export function BusVisualizer({
         <div
           ref={busRef}
           className={[
-            'absolute rounded-full border bg-card px-3 py-1 text-xs font-mono',
+            'absolute rounded-full border-2 bg-card px-5 py-1.5 text-sm font-mono font-bold shadow-sm',
             'transition-all duration-300',
             busStage === 'bus'
-              ? 'border-emerald-400 text-emerald-600 dark:text-emerald-400 animate-pulse'
+              ? 'border-emerald-400 text-emerald-600 dark:text-emerald-400 animate-pulse scale-105'
               : 'border-border text-muted-foreground',
           ].join(' ')}
-          style={{ left: '50%', transform: 'translateX(-50%) translateY(-2.5rem)' }}
+          style={{ left: '50%', transform: 'translateX(-50%) translateY(-4.5rem)' }}
           aria-live="polite"
           aria-label={`Bus: ${activeTxType ? txLabel(activeTxType) : 'idle'}`}
         >
@@ -512,17 +520,17 @@ export function BusVisualizer({
         {dot.visible && (
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute"
+            className="pointer-events-none absolute z-50"
             style={{
-              width: 13,
-              height: 13,
+              width: 22,
+              height: 22,
               borderRadius: '50%',
               background: 'hsl(142, 71%, 45%)',
               top: 0,
               left: 0,
-              transform: `translate(${dot.x - 6.5}px, ${dot.y - 6.5}px)`,
-              transition: `transform ${dotTransitionMs}ms cubic-bezier(0.4, 0, 0.2, 1)`,
-              boxShadow: '0 0 0 4px rgba(16,185,129,0.2), 0 0 14px rgba(16,185,129,0.45)',
+              transform: `translate(${dot.x - 11}px, ${dot.y - 11}px)`,
+              transition: `transform ${dotTransitionMs}ms cubic-bezier(0.34, 1.56, 0.64, 1)`,
+              boxShadow: '0 0 0 6px rgba(16,185,129,0.3), 0 0 28px rgba(16,185,129,0.8)',
             }}
           />
         )}

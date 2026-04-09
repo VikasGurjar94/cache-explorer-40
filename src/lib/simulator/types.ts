@@ -43,6 +43,7 @@ export interface LogEntry {
   memoryUpdates: { address: string; oldValue: number; newValue: number }[];
   hitOrMiss: 'hit' | 'miss';
   description: string[];
+  accessTimeNs?: number;
 }
 
 export interface SimulatorSnapshot {

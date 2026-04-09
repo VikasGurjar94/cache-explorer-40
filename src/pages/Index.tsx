@@ -8,6 +8,7 @@ import { OperationInput } from '@/components/OperationInput';
 import { CacheTable } from '@/components/CacheTable';
 import { MemoryView } from '@/components/MemoryView';
 import { LogPanel } from '@/components/LogPanel';
+
 import { TimelinePanel } from '@/components/TimelinePanel';
 import { BusVisualizer } from '@/components/BusVisualizer';
 import { SCENARIO_PRESETS } from '@/lib/simulator/presets';
@@ -15,7 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { generateLearningSteps } from '@/lib/simulator/explanation';
+
 
 const Index = () => {
   const [state, setState] = useState(() => createSimulatorState('MSI', 2));
@@ -175,10 +176,7 @@ const Index = () => {
   const busStateChanges = displayLastLog?.stateChanges ?? [];
   const activeCoreId = displaySnapshot?.operation?.coreId ?? null;
 
-  const learningExplanation = useMemo(() => {
-    if (!learningMode || !displayLastLog) return [];
-    return generateLearningSteps(displayLastLog, state.protocol).slice(0, 4);
-  }, [learningMode, displayLastLog, state.protocol]);
+
 
   const metrics = useMemo(() => {
     const total = displayLogs.length;
@@ -214,13 +212,13 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-background text-foreground p-4 sm:p-6 lg:p-8">
-      <div className="relative max-w-[1400px] mx-auto space-y-4">
+      <div className="relative max-w-[1400px] mx-auto space-y-6">
         <header className="rounded-2xl border border-border bg-card/90 p-4 shadow-lg backdrop-blur-sm dark:bg-slate-900/80 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Cache Coherency Simulator</h1>
               <p className="mt-1 text-sm text-muted-foreground sm:text-base">Visualize MSI, MESI & MOESI transitions with step-by-step operations.</p>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
+              <div className="mt-4 flex flex-wrap items-center gap-2">
                 <div className="rounded-xl border border-border bg-secondary px-3 py-2 text-xs font-medium uppercase tracking-[0.2em] text-secondary-foreground">
                   {state.protocol} • {state.coreCount} cores
                 </div>
@@ -240,10 +238,17 @@ const Index = () => {
                   Learning Mode: {learningMode ? 'ON' : 'OFF'}
                 </Button>
                 {latestOp && (
-                  <Badge variant="outline" className="font-mono text-xs">
-                    Active: C{latestOp.coreId} {latestOp.type} {latestOp.address}
-                    {latestOp.type === 'WRITE' ? `=${latestOp.value ?? 0}` : ''}
-                  </Badge>
+                  <div className="flex items-center gap-2 ml-2">
+                    <Badge variant="outline" className="font-mono text-xs bg-muted/40 px-2 py-1">
+                      Active: C{latestOp.coreId} {latestOp.type} {latestOp.address}
+                      {latestOp.type === 'WRITE' ? `=${latestOp.value ?? 0}` : ''}
+                    </Badge>
+                    {displayLastLog?.accessTimeNs !== undefined && (
+                      <Badge variant="secondary" className="font-mono text-xs shadow-sm bg-background border px-2 py-1">
+                        ⏱️ {displayLastLog.accessTimeNs}ns
+                      </Badge>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -308,8 +313,8 @@ const Index = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-                <div className="lg:col-span-3 space-y-4">
+              <div className="grid grid-cols-1 gap-8 lg:grid-cols-5">
+                <div className="lg:col-span-3 space-y-6">
                   <BusVisualizer
                     key={`bus-${displaySnapshot?.step ?? 0}`}
                     coreCount={state.coreCount}
@@ -335,16 +340,26 @@ const Index = () => {
                   <MemoryView memory={displayMemory} />
                 </div>
 
-                <div className="lg:col-span-2 space-y-4">
-                  <div className="rounded-xl border border-border bg-background p-3">
+                <div className="lg:col-span-2 space-y-6">
+                  <div className="rounded-xl border border-border bg-background p-5 shadow-sm relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-1.5 h-full bg-blue-500/50"></div>
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Bus Activity</div>
-                        <div className="mt-1 text-sm font-semibold">Last 1–2 coherence events</div>
+                        <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-bold">Bus Activity</div>
+                        <div className="mt-1 text-base font-semibold">Step {displaySnapshot?.step ?? 0} Events</div>
                       </div>
-                      <Badge variant="secondary" className="font-mono text-xs">
-                        Step {displaySnapshot?.step ?? 0}
-                      </Badge>
+                      {displayLastLog?.accessTimeNs !== undefined ? (
+                         <div className="text-right">
+                           <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1 font-bold">Time taken</div>
+                           <Badge variant="secondary" className="font-mono text-sm shadow-sm bg-background border">
+                             ⏱️ {displayLastLog.accessTimeNs}ns
+                           </Badge>
+                         </div>
+                      ) : (
+                        <Badge variant="secondary" className="font-mono text-xs">
+                          Step {displaySnapshot?.step ?? 0}
+                        </Badge>
+                      )}
                     </div>
 
                     {busTransactions.length === 0 ? (
@@ -374,19 +389,7 @@ const Index = () => {
                     )}
                   </div>
 
-                  {learningMode && displayLastLog && (
-                    <div className="rounded-xl border border-border bg-background p-3">
-                      <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Learning</div>
-                      <div className="mt-1 text-sm font-semibold">Why this step happened</div>
-                      <div className="mt-3 space-y-2">
-                        {learningExplanation.map((line, i) => (
-                          <div key={`${displayLastLog.step}-${i}`} className="rounded-md bg-card/60 border border-border p-2 text-xs font-mono text-foreground">
-                            <span className="font-semibold">{i + 1}.</span> {line}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+
                 </div>
               </div>
             </div>

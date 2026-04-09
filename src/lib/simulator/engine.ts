@@ -58,6 +58,53 @@ export function executeNextStep(state: SimulatorState): SimulatorState | null {
       break;
   }
 
+  // ── Hardware-accurate cache latency model ────────────────────────────────
+  // Based on real CPU memory hierarchy timings (modern x86-64, ~3GHz clock):
+  //   L1 hit          :   1 ns   (3–4 cycles)
+  //   L2 miss / fetch :  10 ns   (~30 cycles, shared LLC or L2)
+  //   DRAM fetch      : 100 ns   (~300 cycles, DDR4 CAS latency + controller)
+  //   Bus arbitration :   5 ns   (snooping + grant)
+  //   Bus data xfer   :  10 ns   (64B cache line over FSB/QPI/HyperTransport)
+  //   Invalidation msg:   5 ns   (MESI/MOESI invalidate broadcast per core)
+  //   WriteBack to mem:  80 ns   (dirty line flush, includes write-buffer drain)
+
+  let calculatedTimeNs: number;
+
+  if (log.hitOrMiss === 'hit') {
+    // L1 cache hit — serviced entirely from the local cache
+    calculatedTimeNs = 1;
+  } else {
+    // Check for cache-to-cache (S→S or M→S) transfer vs DRAM fetch
+    const hasCacheToCacheTransfer = log.busTransactions.some(
+      (t) => t.type === 'BusRd' || t.type === 'BusUpgr'
+    );
+    if (hasCacheToCacheTransfer) {
+      // Supplied by another core's cache (e.g. S→S sharing, M→S intervention)
+      // Cheaper than DRAM: bus arbitration + line transfer
+      calculatedTimeNs = 10 + 5 + 10; // L2 miss + bus arb + bus xfer = 25 ns
+    } else {
+      // True cold miss — must go all the way to DRAM
+      calculatedTimeNs = 100; // DRAM fetch
+    }
+  }
+
+  // Bus transaction overhead (one round per transaction)
+  for (const tx of log.busTransactions) {
+    calculatedTimeNs += 5;  // arbitration per transaction
+    calculatedTimeNs += 10; // data transfer per cache-line
+    if (tx.type === 'BusRdX' || tx.type === 'BusUpgr') {
+      // Invalidation broadcast: each snooping core adds ~5 ns acknowledgement
+      const invalidatedCount = log.stateChanges.filter((sc) => sc.newState === 'I').length;
+      calculatedTimeNs += invalidatedCount * 5;
+    }
+  }
+
+  // WriteBack penalty — dirty line must be flushed to memory first
+  calculatedTimeNs += log.memoryUpdates.length * 80;
+
+  // Append timing to log entry
+  log.accessTimeNs = calculatedTimeNs;
+
   const nextState: SimulatorState = {
     ...state,
     caches: newCaches,

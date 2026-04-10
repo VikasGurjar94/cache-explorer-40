@@ -1,100 +1,107 @@
+import { useState } from 'react';
 import { LogEntry, STATE_COLORS, ProtocolType } from '@/lib/simulator/types';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Badge } from '@/components/ui/badge';
 import { generateLearningSteps, summarizeLog } from '@/lib/simulator/explanation';
+import { ChevronDown, ChevronUp, Info } from 'lucide-react';
 
 interface LogPanelProps {
   logs: LogEntry[];
-  learningMode: boolean;
   protocol: ProtocolType;
 }
 
-export function LogPanel({ logs, learningMode, protocol }: LogPanelProps) {
+function LogEntryItem({ log, protocol }: { log: LogEntry; protocol: ProtocolType }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const summary = summarizeLog(log);
+  const steps = isExpanded ? generateLearningSteps(log, protocol) : [];
+
   return (
-    <div className="rounded-md border bg-card h-full flex flex-col">
-      <div className="px-3 py-2 border-b bg-muted/50 flex items-center justify-between">
-        <h3 className="font-mono text-sm font-semibold text-foreground">Execution Log</h3>
-        <span className="rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.2em] bg-primary/10 text-primary">
-          {learningMode ? 'Learning ON' : 'Compact Mode'}
-        </span>
+    <div className="relative pl-4 border-l-2 border-slate-200 hover:border-indigo-300 transition-colors space-y-2 pb-2">
+      <div className="absolute top-0 left-[-5px] w-2 h-2 rounded-full bg-indigo-200 ring-4 ring-slate-50"></div>
+      
+      <div className="flex items-start justify-between gap-2 mt-[-2px]">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+            Step {log.step}
+          </span>
+          <span className="font-mono text-[11px] font-bold text-slate-800">
+            C{log.operation.coreId} {log.operation.type} {log.operation.address}
+            {log.operation.type === 'WRITE' ? `=${log.operation.value}` : ''}
+          </span>
+        </div>
+        <button 
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="flex items-center gap-1 text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded transition-colors"
+        >
+          <Info className="w-3 h-3" />
+          {isExpanded ? 'Hide Details' : 'Explain'}
+        </button>
       </div>
-      <ScrollArea className="flex-1 p-3">
+      
+      <div className="flex items-center gap-2 flex-wrap">
+          {log.accessTimeNs !== undefined && (
+            <span
+              className="font-mono text-[10px] font-medium"
+              style={{ color: log.accessTimeNs <= 17 ? STATE_COLORS['E'] : (log.accessTimeNs > 100 ? STATE_COLORS['M'] : STATE_COLORS['O']) }}
+            >
+              ⏱️ {log.accessTimeNs}ns
+            </span>
+          )}
+          
+          <span
+            className="font-mono text-[10px] font-bold tracking-wider"
+            style={{ color: log.hitOrMiss === 'hit' ? STATE_COLORS['E'] : STATE_COLORS['M'] }}
+          >
+            {log.hitOrMiss.toUpperCase()}
+          </span>
+
+          {log.isPrefetch && (
+            <span className="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+              ⚡ PPC
+            </span>
+          )}
+
+          {log.busTransactions.length > 0 && (
+            <div className="flex gap-1">
+              {log.busTransactions.map((tx, i) => (
+                <span key={i} className="font-mono text-[9px] px-1 bg-slate-100 text-slate-500 rounded border border-slate-200">
+                  {tx.type}
+                </span>
+              ))}
+            </div>
+          )}
+      </div>
+      
+      <div className="text-[10px] font-mono text-slate-500 leading-relaxed">
+        {summary}
+      </div>
+
+      {isExpanded && (
+        <div className="mt-2 space-y-1 text-[10px] font-mono text-slate-700 bg-slate-50 rounded border border-slate-200 p-2">
+          {steps.map((line, i) => (
+            <div key={`${log.step}-${i}`} className="flex gap-1.5">
+              <span className="font-bold text-slate-400">{i + 1}.</span> 
+              <span>{line}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function LogPanel({ logs, protocol }: LogPanelProps) {
+  return (
+    <div className="h-full flex flex-col bg-transparent">
+      <ScrollArea className="flex-1 p-2 custom-scrollbar pr-4">
         {logs.length === 0 ? (
-          <p className="text-muted-foreground text-xs italic text-center mt-4">
-            No operations executed yet. Add operations and click "Next Step".
+          <p className="text-slate-400 text-[11px] uppercase tracking-widest font-semibold font-mono text-center mt-6">
+            Awaiting Activity...
           </p>
         ) : (
-          <div className="space-y-3">
-            {logs.map((log) => {
-              const steps = learningMode ? generateLearningSteps(log, protocol) : [];
-              const summary = summarizeLog(log);
-              return (
-                <div key={log.step} className="rounded border bg-muted/30 p-3 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary" className="font-mono text-xs">
-                      Step {log.step}
-                    </Badge>
-                    <span className="font-mono text-xs font-medium text-foreground">
-                      Core {log.operation.coreId} {log.operation.type} {log.operation.address}
-                      {log.operation.type === 'WRITE' ? ` = ${log.operation.value}` : ''}
-                    </span>
-                    <div className="ml-auto flex items-center gap-2">
-                      {log.accessTimeNs !== undefined && (
-                        <Badge
-                          variant="secondary"
-                          className="font-mono text-xs shadow-sm bg-background border"
-                          style={{
-                            color: log.accessTimeNs <= 17 ? STATE_COLORS['E'] : (log.accessTimeNs > 100 ? STATE_COLORS['M'] : STATE_COLORS['O']),
-                            borderColor: log.accessTimeNs <= 17 ? STATE_COLORS['E'] : (log.accessTimeNs > 100 ? STATE_COLORS['M'] : STATE_COLORS['O']),
-                          }}
-                        >
-                          ⏱️ {log.accessTimeNs}ns
-                        </Badge>
-                      )}
-                      <Badge
-                        variant="outline"
-                        className="text-xs"
-                        style={{
-                          color: log.hitOrMiss === 'hit' ? STATE_COLORS['E'] : STATE_COLORS['M'],
-                          borderColor: log.hitOrMiss === 'hit' ? STATE_COLORS['E'] : STATE_COLORS['M'],
-                        }}
-                      >
-                        {log.hitOrMiss.toUpperCase()}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="text-xs font-mono text-muted-foreground pl-2 border-l-2 border-border">
-                    {learningMode ? 'Detailed explanation:' : summary}
-                  </div>
-
-                  {learningMode ? (
-                    <div className="mt-1 space-y-1 text-xs font-mono text-foreground">
-                      {steps.map((line, i) => (
-                        <div key={`${log.step}-${i}`} className="rounded-md bg-background/70 p-2 border border-border">
-                          <span className="font-semibold">{i + 1}.</span> {line}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-xs font-mono text-muted-foreground">
-                      {log.description.slice(0, 2).map((line, i) => (
-                        <p key={i}>{line}</p>
-                      ))}
-                    </div>
-                  )}
-
-                  {log.busTransactions.length > 0 && (
-                    <div className="flex gap-1 flex-wrap">
-                      {log.busTransactions.map((tx, i) => (
-                        <Badge key={i} variant="outline" className="font-mono text-xs">
-                          {tx.type}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+          <div className="space-y-4 pt-1 pb-4">
+            {logs.map((log) => (
+              <LogEntryItem key={log.step} log={log} protocol={protocol} />
+            ))}
           </div>
         )}
       </ScrollArea>

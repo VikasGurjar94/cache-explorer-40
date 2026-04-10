@@ -42,6 +42,8 @@ export interface LogEntry {
   }[];
   memoryUpdates: { address: string; oldValue: number; newValue: number }[];
   hitOrMiss: 'hit' | 'miss';
+  /** True when this access was satisfied by a PPC hardware prefetch */
+  isPrefetch?: boolean;
   description: string[];
   accessTimeNs?: number;
 }
@@ -64,6 +66,8 @@ export interface SimulatorState {
   coreCount: number;
   timelineIndex: number;
   history: SimulatorSnapshot[];
+  /** Predictive Prefetch Coherence mode enabled */
+  ppcMode: boolean;
 }
 
 export const STATE_COLORS: Record<CacheStateValue, string> = {

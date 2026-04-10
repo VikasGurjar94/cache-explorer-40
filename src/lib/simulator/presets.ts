@@ -68,4 +68,15 @@ export const SCENARIO_PRESETS: ScenarioPreset[] = [
       { coreId: 1, type: 'READ', address: 'D' },
     ],
   },
+  {
+    id: 'ppc-pattern',
+    title: 'PPC Pattern Example',
+    description: 'A sequential read pattern that benefits greatly from Predictive Prefetching (PPC).',
+    operations: [
+      { coreId: 0, type: 'READ', address: 'A' },
+      { coreId: 0, type: 'READ', address: 'B' },
+      { coreId: 0, type: 'READ', address: 'C' },
+      { coreId: 0, type: 'READ', address: 'D' },
+    ],
+  },
 ];

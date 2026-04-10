@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { Badge } from '@/components/ui/badge';
+import { Cpu } from 'lucide-react';
 import {
   CacheStateValue,
   BusTransaction,
   BusTransactionType,
   LogEntry,
+  CoreCache
 } from '@/lib/simulator/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -15,6 +17,7 @@ interface BusVisualizerProps {
   busTransactions: BusTransaction[];
   stateChanges: LogEntry['stateChanges'];
   activeStep: number;
+  caches: CoreCache[];
 }
 
 type Highlight = {
@@ -30,20 +33,15 @@ type Speed     = 0.5 | 1 | 2;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-/**
- * Base timing values at 1× speed (ms).
- * Kept generous so each phase is clearly visible before the next begins.
- * The speed multiplier divides these, so 2× = half the duration.
- */
 const BASE_TIMING = {
-  DOT_SETTLE:       60,  // pause before dot leaves the sender core
-  CORE_TO_BUS:     550,  // dot travels: core → bus
-  BUS_DWELL:       400,  // dot sits on bus while label pulses
-  BUS_LABEL_REVEAL: 250, // extra wait for the tx label to "sink in"
-  BUS_SETTLE:      120,  // pause after highlights are applied
-  CORE_STEP:       550,  // dot travels: bus → each target core
-  CORE_TAIL:       350,  // pause after reaching the last core
-  TX_GAP:          150,  // gap between back-to-back transactions
+  DOT_SETTLE:       60,
+  CORE_TO_BUS:     550,
+  BUS_DWELL:       400,
+  BUS_LABEL_REVEAL: 250,
+  BUS_SETTLE:      120,
+  CORE_STEP:       550,
+  CORE_TAIL:       350,
+  TX_GAP:          150,
 } as const;
 
 const SPEED_OPTIONS: { value: Speed; label: string }[] = [
@@ -62,7 +60,6 @@ const PHASE_STEPS: { stage: BusStage; label: string }[] = [
   { stage: 'toCores', label: 'Bus → Cores'   },
 ];
 
-// Tailwind colour class per MESI(O) state
 const STATE_COLORS: Record<string, string> = {
   M: 'text-red-500',
   E: 'text-emerald-500',
@@ -81,7 +78,7 @@ function unique<T>(arr: T[]): T[] {
   return Array.from(new Set(arr));
 }
 
-// ─── Inline SVG icons (no extra deps) ────────────────────────────────────────
+// ─── Inline SVG icons ────────────────────────────────────────────────────────
 
 function IconPlay() {
   return (
@@ -116,13 +113,12 @@ export function BusVisualizer({
   busTransactions,
   stateChanges,
   activeStep,
+  caches,
 }: BusVisualizerProps) {
-  // DOM refs
   const containerRef = useRef<HTMLDivElement | null>(null);
   const coreRefs     = useRef<Array<HTMLDivElement | null>>([]);
   const busRef       = useRef<HTMLDivElement | null>(null);
 
-  // Visual state
   const [activeTxType, setActiveTxType] = useState<BusTransactionType | null>(null);
   const [busStage, setBusStage]         = useState<BusStage>('idle');
   const [dot, setDot]                   = useState<{ visible: boolean; x: number; y: number }>({
@@ -132,32 +128,23 @@ export function BusVisualizer({
     invalidated: [], shared: [], modified: [], sender: null,
   });
 
-  // Playback state
   const [playState, setPlayState] = useState<PlayState>('idle');
   const [speed, setSpeed]         = useState<Speed>(1);
+  const [playGen, setPlayGen]     = useState(-1);
 
-  /**
-   * Incrementing `playGen` is the only thing that (re)starts the animation
-   * effect. This cleanly separates "start/restart" from "pause/resume", which
-   * are handled entirely via refs without triggering a re-run of the effect.
-   */
-  const [playGen, setPlayGen] = useState(-1);
+  const [centers, setCenters] = useState<{ cores: {x: number, y: number}[], bus: {x: number, y: number} | null }>({ cores: [], bus: null });
 
-  // Refs for cross-render pause ↔ resume communication with the async IIFE
-  const isPausedRef    = useRef(true);
-  const resumeRef      = useRef<(() => void) | null>(null);
-  const speedRef       = useRef<Speed>(1);
+  const isPausedRef     = useRef(true);
+  const resumeRef       = useRef<(() => void) | null>(null);
+  const speedRef        = useRef<Speed>(1);
   const reduceMotionRef = useRef(false);
 
-  // Keep speedRef in sync (the IIFE reads it on every sleep() call)
   useEffect(() => { speedRef.current = speed; }, [speed]);
 
-  // Trim stale core refs whenever coreCount shrinks
   useEffect(() => {
     coreRefs.current = coreRefs.current.slice(0, coreCount);
   }, [coreCount]);
 
-  // Subscribe to OS reduced-motion preference
   useEffect(() => {
     const mq = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     if (!mq) return;
@@ -167,7 +154,34 @@ export function BusVisualizer({
     return () => mq.removeEventListener('change', handler);
   }, []);
 
-  // Derived maps
+  useLayoutEffect(() => {
+    const updateCenters = () => {
+      if (!containerRef.current) return;
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const toLocal = (r: DOMRect) => ({
+        x: r.left + r.width  / 2 - containerRect.left,
+        y: r.top  + r.height / 2 - containerRect.top,
+      });
+
+      const newCoreCenters = Array.from({ length: coreCount }).map((_, i) => {
+        const el = coreRefs.current[i];
+        return el ? toLocal(el.getBoundingClientRect()) : { x: 0, y: 0 };
+      });
+      const newBusCenter = busRef.current ? toLocal(busRef.current.getBoundingClientRect()) : null;
+
+      setCenters({ cores: newCoreCenters, bus: newBusCenter });
+    };
+
+    updateCenters();
+    // Re-measure after a small delay to ensure rendering completes
+    const timer = setTimeout(updateCenters, 50);
+    window.addEventListener('resize', updateCenters);
+    return () => {
+      window.removeEventListener('resize', updateCenters);
+      clearTimeout(timer);
+    };
+  }, [coreCount, caches]); // caches trigger re-measure if height changes
+
   const newStateByCore = useMemo(() => {
     const map = new Map<number, CacheStateValue>();
     for (const ch of stateChanges ?? []) map.set(ch.coreId, ch.newState);
@@ -183,7 +197,6 @@ export function BusVisualizer({
     };
   }, [stateChanges]);
 
-  // Resolve which cores are affected by each transaction type
   const getTargets = useCallback((tx: BusTransaction): number[] => {
     switch (tx.type) {
       case 'BusRd':
@@ -200,7 +213,6 @@ export function BusVisualizer({
     }
   }, [invalidated, shared, modified, stateChanges]);
 
-  // ── Reset when the timeline step changes ───────────────────────────────────
   useEffect(() => {
     setActiveTxType(null);
     setBusStage('idle');
@@ -212,12 +224,8 @@ export function BusVisualizer({
     resumeRef.current   = null;
   }, [activeStep]);
 
-  // ── Main animation loop ────────────────────────────────────────────────────
   useEffect(() => {
-    if (playGen < 0 || busTransactions.length === 0 || !containerRef.current) return;
-
-    const busRect = busRef.current?.getBoundingClientRect();
-    if (!busRect) return;
+    if (playGen < 0 || busTransactions.length === 0 || !containerRef.current || !busRef.current) return;
 
     const containerRect = containerRef.current.getBoundingClientRect();
     const toLocal = (r: DOMRect) => ({
@@ -225,29 +233,22 @@ export function BusVisualizer({
       y: r.top  + r.height / 2 - containerRect.top,
     });
 
-    const coreCenters = Array.from({ length: coreCount }, (_, i) => {
+    const currentCoreCenters = Array.from({ length: coreCount }, (_, i) => {
       const el = coreRefs.current[i];
       return el ? toLocal(el.getBoundingClientRect()) : null;
     });
-    const busCenter = toLocal(busRect);
+    const currentBusCenter = toLocal(busRef.current.getBoundingClientRect());
 
     const cancelled = { current: false };
     const timeouts:  number[]  = [];
 
-    /**
-     * sleep() respects the live speed and pause state.
-     *
-     * If the component is paused when the timeout fires, `resolve` is stored
-     * in `resumeRef`. The Play/Resume handler calls it later, waking the IIFE
-     * without any polling.
-     */
     const sleep = (baseMs: number): Promise<void> =>
       new Promise<void>((resolve) => {
         const scaled = Math.max(1, Math.round(baseMs / speedRef.current));
         const id = window.setTimeout(() => {
           if (cancelled.current) return;
           if (isPausedRef.current) {
-            resumeRef.current = resolve; // suspend the IIFE
+            resumeRef.current = resolve;
           } else {
             resolve();
           }
@@ -255,7 +256,6 @@ export function BusVisualizer({
         timeouts.push(id);
       });
 
-    // Reduced-motion: skip animation, show final result immediately
     if (reduceMotionRef.current) {
       const tx = busTransactions[0];
       setActiveTxType(tx?.type ?? null);
@@ -270,23 +270,20 @@ export function BusVisualizer({
         if (cancelled.current) return;
 
         const sender       = tx.initiator;
-        const senderCenter = coreCenters[sender] ?? busCenter;
+        const senderCenter = currentCoreCenters[sender] ?? currentBusCenter;
 
-        // ── Phase 1: Core → Bus ────────────────────────────────────────────
         setActiveTxType(tx.type);
         setBusStage('toBus');
         setHighlight((h) => ({ ...h, sender }));
         setDot({ visible: true, ...senderCenter });
         await sleep(BASE_TIMING.DOT_SETTLE);
-        setDot({ visible: true, ...busCenter });
+        setDot({ visible: true, ...currentBusCenter });
         setBusStage('bus');
         await sleep(BASE_TIMING.CORE_TO_BUS);
 
-        // ── Phase 2: Bus dwell + label reveal ─────────────────────────────
         await sleep(BASE_TIMING.BUS_DWELL);
         await sleep(BASE_TIMING.BUS_LABEL_REVEAL);
 
-        // ── Phase 3: Apply per-core highlights ────────────────────────────
         const targets          = getTargets(tx);
         const invalidationsNow = unique(targets.filter((id) => newStateByCore.get(id) === 'I'));
         const modifiedNow      = unique(targets.filter((id) => newStateByCore.get(id) === 'M'));
@@ -299,27 +296,24 @@ export function BusVisualizer({
         setBusStage('toCores');
         await sleep(BASE_TIMING.BUS_SETTLE);
 
-        // ── Phase 4: Dot visits each affected core ─────────────────────────
-        const validTargets = targets.filter((id) => coreCenters[id] !== null);
+        const validTargets = targets.filter((id) => currentCoreCenters[id] !== null);
         if (validTargets.length === 0) {
-          setDot({ visible: true, ...busCenter });
+          setDot({ visible: true, ...currentBusCenter });
           await sleep(BASE_TIMING.CORE_TAIL);
         } else {
           for (const tid of validTargets) {
             if (cancelled.current) return;
-            setDot({ visible: true, ...coreCenters[tid]! });
+            setDot({ visible: true, ...currentCoreCenters[tid]! });
             await sleep(BASE_TIMING.CORE_STEP);
           }
         }
 
-        // Reset between transactions
         setDot((d) => ({ ...d, visible: false }));
         setBusStage('idle');
         await sleep(BASE_TIMING.TX_GAP);
       }
 
       if (!cancelled.current) {
-        // Clear highlights so cores stop blinking when animation finishes
         setHighlight({ invalidated: [], shared: [], modified: [], sender: null });
         setBusStage('idle');
         setActiveTxType(null);
@@ -333,11 +327,8 @@ export function BusVisualizer({
     };
   }, [playGen, busTransactions, coreCount, newStateByCore, invalidated, shared, modified, getTargets]);
 
-  // ── Playback handler ───────────────────────────────────────────────────────
-
   const handlePlayPause = useCallback(() => {
     if (playState === 'idle' || playState === 'done') {
-      // (Re)start from scratch
       setActiveTxType(null);
       setBusStage('idle');
       setHighlight({ invalidated: [], shared: [], modified: [], sender: null });
@@ -347,11 +338,9 @@ export function BusVisualizer({
       setPlayState('playing');
       setPlayGen((g) => g + 1);
     } else if (playState === 'playing') {
-      // Pause — IIFE stays alive; it will block on the next sleep()
       isPausedRef.current = true;
       setPlayState('paused');
     } else {
-      // Resume — wake the stored resolve from the suspended sleep()
       isPausedRef.current = false;
       const resume = resumeRef.current;
       resumeRef.current   = null;
@@ -359,8 +348,6 @@ export function BusVisualizer({
       setPlayState('playing');
     }
   }, [playState]);
-
-  // ── Derived UI values ──────────────────────────────────────────────────────
 
   const hasTransactions = busTransactions.length > 0;
   const currentPhaseIdx = PHASE_STEPS.findIndex((p) => p.stage === busStage);
@@ -375,24 +362,21 @@ export function BusVisualizer({
     playState === 'done'    ? IconReplay :
     playState === 'playing' ? IconPause  : IconPlay;
 
-  // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className="rounded-xl border border-border bg-background p-3 space-y-3">
+    <div className="rounded-xl border border-border bg-card p-4 space-y-4 shadow-sm">
 
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-2">
         <div>
-          <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+          <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground font-semibold">
             Coherence Bus
           </div>
-          <div className="mt-1 text-sm font-semibold">Cause → effect across cores</div>
+          <div className="mt-1 text-sm font-semibold text-slate-800">Cause → effect across system cores</div>
         </div>
-        <Badge variant="secondary" className="font-mono text-xs">
+        <Badge variant="secondary" className="font-mono text-xs bg-indigo-50 text-indigo-700 border-indigo-200">
           {hasTransactions && activeTxType ? txLabel(activeTxType) : 'Idle'}
         </Badge>
       </div>
 
-      {/* ── Phase progress bar ─────────────────────────────────────────────── */}
       {hasTransactions && (
         <div className="space-y-1">
           <div className="flex items-center gap-1">
@@ -404,24 +388,16 @@ export function BusVisualizer({
                   <div
                     className={[
                       'h-1 flex-1 rounded-full transition-all duration-500',
-                      isActive ? 'bg-emerald-500' :
-                      isDone   ? 'bg-emerald-300 dark:bg-emerald-700' :
-                                 'bg-muted',
+                      isActive ? 'bg-indigo-500' :
+                      isDone   ? 'bg-indigo-300' :
+                                 'bg-slate-200',
                     ].join(' ')}
                   />
-                  {idx < PHASE_STEPS.length - 1 && (
-                    <div
-                      className={[
-                        'w-1.5 h-1.5 rounded-full flex-shrink-0 transition-all duration-500',
-                        isActive || isDone ? 'bg-emerald-400' : 'bg-muted',
-                      ].join(' ')}
-                    />
-                  )}
                 </div>
               );
             })}
           </div>
-          <div className="text-[10px] text-muted-foreground font-mono text-right">
+          <div className="text-[10px] text-slate-500 font-mono text-right font-semibold">
             {busStage !== 'idle'
               ? `${currentPhaseIdx + 1} / ${PHASE_STEPS.length} — ${PHASE_STEPS[currentPhaseIdx]?.label ?? ''}`
               : playState === 'done'
@@ -434,12 +410,55 @@ export function BusVisualizer({
       {/* ── Visualization canvas ────────────────────────────────────────────── */}
       <div
         ref={containerRef}
-        className="flex items-center gap-8 justify-center relative select-none my-6"
-        style={{ paddingTop: '4rem', paddingBottom: '3rem' }}
+        className="flex flex-wrap items-start gap-6 lg:gap-8 justify-center relative select-none my-6 w-full min-h-[220px]"
+        style={{ paddingTop: '5.5rem', paddingBottom: '3rem' }}
         role="img"
         aria-label={`Cache coherence bus visualization, ${coreCount} cores`}
       >
-        {/* Core circles */}
+        {/* SVG connection lines overlay */}
+        <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
+          {centers.bus && centers.cores.map((coreCenter, i) => {
+            const isInvalidated = highlight.invalidated.includes(i);
+            const isModified    = highlight.modified.includes(i);
+            const isShared      = highlight.shared.includes(i);
+            const isSender      = highlight.sender === i;
+            
+            // Highlight connections that are part of the active bus transaction
+            const isActiveConnection = busStage !== 'idle' && (isSender || isInvalidated || isModified || isShared);
+            
+            return (
+               <path 
+                 key={`path-${i}`}
+                 d={`M ${coreCenter.x} ${coreCenter.y} L ${centers.bus!.x} ${centers.bus!.y}`}
+                 fill="none"
+                 stroke={isActiveConnection ? "hsl(217, 91%, 60%)" : "rgb(226,232,240)"}
+                 strokeWidth={isActiveConnection ? 2 : 1.5}
+                 strokeOpacity={isActiveConnection ? 0.7 : 0.8}
+                 strokeLinecap="round"
+                 className={`transition-colors duration-300 ${isActiveConnection && playState === 'playing' ? 'animate-pulse' : ''}`}
+               />
+            );
+          })}
+        </svg>
+
+        {/* Bus label block */}
+        <div
+          ref={busRef}
+          className={[
+            'absolute rounded-md border-2 bg-white px-8 py-2 text-sm font-mono font-bold shadow-md z-10',
+            'transition-all duration-300 flex items-center justify-center gap-2',
+            busStage === 'bus'
+              ? 'border-indigo-400 text-indigo-600 animate-pulse scale-105'
+              : 'border-slate-200 text-slate-500',
+          ].join(' ')}
+          style={{ left: '50%', transform: 'translateX(-50%) translateY(-5.5rem)' }}
+        >
+          <div className="w-2 h-2 rounded-full bg-current opacity-70 animate-ping absolute -left-1"></div>
+          {activeTxType ? txLabel(activeTxType) : 'System Bus'}
+          <div className="w-2 h-2 rounded-full bg-current opacity-70 animate-ping absolute -right-1"></div>
+        </div>
+
+        {/* Core Chip Cards */}
         {Array.from({ length: coreCount }, (_, i) => {
           const newState      = newStateByCore.get(i) ?? null;
           const isInvalidated = highlight.invalidated.includes(i);
@@ -448,107 +467,116 @@ export function BusVisualizer({
           const isSender      = highlight.sender === i;
 
           const circleStyle: CSSProperties = (() => {
-            if (isInvalidated) return { borderColor: 'rgb(244,63,94)',  background: 'rgba(244,63,94,0.15)'  };
-            if (isModified)    return { borderColor: 'rgb(239,68,68)',  background: 'rgba(239,68,68,0.15)'  };
+            if (isInvalidated) return { borderColor: 'rgb(244,63,94)'  };
+            if (isModified)    return { borderColor: 'rgb(239,68,68)'  };
             if (isShared) {
-              if (newState === 'E') return { borderColor: 'rgb(16,185,129)', background: 'rgba(16,185,129,0.12)' };
-              if (newState === 'S') return { borderColor: 'rgb(59,130,246)', background: 'rgba(59,130,246,0.12)' };
-              /* O */               return { borderColor: 'rgb(245,158,11)', background: 'rgba(245,158,11,0.13)' };
+              if (newState === 'E') return { borderColor: 'rgb(16,185,129)' };
+              if (newState === 'S') return { borderColor: 'rgb(59,130,246)' };
+              /* O */               return { borderColor: 'rgb(245,158,11)' };
             }
-            if (isSender) return { borderColor: 'rgb(16,185,129)', background: 'rgba(16,185,129,0.08)' };
-            return {};
+            if (isSender) return { borderColor: 'rgb(16,185,129)' };
+            return { borderColor: 'rgb(226,232,240)' };
           })();
 
           const isTarget = isInvalidated || isModified || isShared;
-          // Only animate-pulse while actively playing to prevent stale blinking
-          const fxClass = (isInvalidated && playState === 'playing') ? 'animate-pulse scale-110 ring-4 ring-rose-500/30' :
-            (isSender && busStage !== 'idle' && playState === 'playing' ? 'scale-110 ring-4 ring-emerald-500/30 drop-shadow-[0_0_8px_rgba(16,185,129,0.5)] z-10' :
-            (isTarget && playState === 'playing' ? 'scale-105 ring-4 ring-blue-500/20' : ''));
+          const fxClass = (isInvalidated && playState === 'playing') ? 'animate-pulse scale-[1.02] ring-4 ring-rose-500/20' :
+            (isSender && busStage !== 'idle' && playState === 'playing' ? 'scale-[1.02] ring-4 ring-emerald-500/20 shadow-lg z-20' :
+            (isTarget && playState === 'playing' ? 'scale-[1.02] ring-4 ring-blue-500/10 z-20' : ''));
+
+          const coreCache = caches.find(c => c.coreId === i);
 
           return (
-            <div key={i} className="flex flex-col items-center gap-1.5">
+            <div key={i} className="flex flex-col items-center gap-1.5 z-20 relative">
               <div
                 ref={(el) => { coreRefs.current[i] = el; }}
                 className={[
-                  'h-20 w-20 rounded-full border-4 flex items-center justify-center',
-                  'font-mono text-base font-bold transition-all duration-300 shadow-md',
-                  'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-100',
+                  'w-36 rounded-xl border-2 flex flex-col items-stretch overflow-hidden',
+                  'transition-all duration-300 shadow-sm bg-white',
                   fxClass,
                 ].join(' ')}
                 style={circleStyle}
-                aria-label={`Core ${i}${newState ? `, state ${newState}` : ''}`}
               >
-                C{i}
+                {/* Chip Header */}
+                <div className="bg-slate-50 px-3 py-2 border-b border-inherit flex justify-between items-center text-slate-700">
+                  <span className="font-bold font-mono text-xs leading-none">CORE {i}</span>
+                  <Cpu className="w-3.5 h-3.5 text-slate-400" />
+                </div>
+                
+                {/* Cache Slots Area */}
+                <div className="p-2 flex flex-col gap-1.5 bg-white min-h-[64px]">
+                  {coreCache && coreCache.lines.size > 0 ? (
+                    Array.from(coreCache.lines.values()).map(line => {
+                       const stateColor = line.state === 'M' ? 'bg-red-500' :
+                                          line.state === 'E' ? 'bg-emerald-500' :
+                                          line.state === 'S' ? 'bg-blue-500' :
+                                          line.state === 'O' ? 'bg-amber-500' : 'bg-rose-400';
+                       
+                       const isChangedSlot = (isModified || isInvalidated || isShared) && busTransactions[0]?.address === line.address;
+
+                       return (
+                         <div key={line.address} className={`border ${isChangedSlot && playState === 'playing' ? 'border-indigo-300 bg-indigo-50' : 'border-slate-100 bg-slate-50'} rounded px-2 py-1 flex justify-between items-center transition-colors`}>
+                             <span className="font-mono text-[10px] font-bold text-slate-600">{line.address}</span>
+                             <span className={`w-4 h-4 rounded-[3px] flex items-center justify-center text-[9px] font-bold text-white shadow-sm transition-colors ${stateColor}`}>
+                               {line.state}
+                             </span>
+                         </div>
+                       )
+                    })
+                  ) : (
+                    <div className="text-[10px] text-slate-400 flex items-center justify-center py-3 h-full italic">Empty Cache</div>
+                  )}
+                </div>
               </div>
 
-              {/* MESI(O) state badge — coloured per state */}
-              <span
+              {/* Status pill under chip */}
+               <span
                 className={[
-                  'text-sm font-mono font-bold transition-colors duration-300',
+                  'text-[10px] font-mono font-bold transition-colors duration-300 px-2 py-0.5 rounded-full border',
                   newState
-                    ? (STATE_COLORS[newState] ?? 'text-muted-foreground')
-                    : 'text-transparent',
+                    ? (STATE_COLORS[newState] ?? 'text-slate-500')
+                    : 'text-transparent border-transparent',
+                  newState ? 'border-current bg-white' : ''
                 ].join(' ')}
                 aria-hidden="true"
               >
-                {newState ?? 'X'}
+                {newState ?? 'I'}
               </span>
-
-              <span className="text-xs font-medium text-muted-foreground">Core {i}</span>
             </div>
           );
         })}
 
-        {/* Bus label */}
-        <div
-          ref={busRef}
-          className={[
-            'absolute rounded-full border-2 bg-card px-5 py-1.5 text-sm font-mono font-bold shadow-sm',
-            'transition-all duration-300',
-            busStage === 'bus'
-              ? 'border-emerald-400 text-emerald-600 dark:text-emerald-400 animate-pulse scale-105'
-              : 'border-border text-muted-foreground',
-          ].join(' ')}
-          style={{ left: '50%', transform: 'translateX(-50%) translateY(-4.5rem)' }}
-          aria-live="polite"
-          aria-label={`Bus: ${activeTxType ? txLabel(activeTxType) : 'idle'}`}
-        >
-          {activeTxType ? txLabel(activeTxType) : 'Bus'}
-        </div>
-
-        {/* Signal dot — GPU-composited transform, hidden from a11y tree */}
+        {/* Signal dot */}
         {dot.visible && (
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute z-50"
+            className="pointer-events-none absolute z-50 text-indigo-500"
             style={{
-              width: 22,
-              height: 22,
-              borderRadius: '50%',
-              background: 'hsl(142, 71%, 45%)',
+              width: 16,
+              height: 16,
               top: 0,
               left: 0,
-              transform: `translate(${dot.x - 11}px, ${dot.y - 11}px)`,
+              transform: `translate(${dot.x - 8}px, ${dot.y - 8}px)`,
               transition: `transform ${dotTransitionMs}ms cubic-bezier(0.34, 1.56, 0.64, 1)`,
-              boxShadow: '0 0 0 6px rgba(16,185,129,0.3), 0 0 28px rgba(16,185,129,0.8)',
             }}
-          />
+          >
+            <div className="w-full h-full rounded-full bg-current shadow-[0_0_12px_currentColor]"></div>
+            <div className="absolute inset-0 rounded-full bg-current animate-ping opacity-75"></div>
+          </div>
         )}
       </div>
 
       {/* ── Playback controls ───────────────────────────────────────────────── */}
       {hasTransactions && (
-        <div className="flex items-center gap-2 pt-2 border-t border-border">
+        <div className="flex items-center gap-2 pt-3 border-t border-slate-100">
 
-          {/* Play / Pause / Resume / Replay */}
           <button
             onClick={handlePlayPause}
             className={[
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium',
-              'border transition-colors',
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold',
+              'border transition-colors shadow-sm',
               playState === 'playing'
-                ? 'border-amber-400 text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950 hover:bg-amber-100 dark:hover:bg-amber-900'
-                : 'border-border bg-background text-foreground hover:bg-muted',
+                ? 'border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100'
+                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
             ].join(' ')}
             aria-label={`${playButtonLabel} animation`}
           >
@@ -556,19 +584,18 @@ export function BusVisualizer({
             {playButtonLabel}
           </button>
 
-          {/* Speed selector */}
           <div className="flex items-center gap-1.5 ml-auto">
-            <span className="text-[10px] text-muted-foreground">Speed</span>
-            <div className="flex rounded-lg border border-border overflow-hidden">
+            <span className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold mr-1">Speed</span>
+            <div className="flex rounded-md border border-slate-200 bg-slate-50 p-0.5">
               {SPEED_OPTIONS.map(({ value, label }) => (
                 <button
                   key={value}
                   onClick={() => setSpeed(value)}
                   className={[
-                    'px-2.5 py-1 text-[11px] font-mono transition-colors',
+                    'px-2.5 py-1 text-[10px] font-mono transition-colors rounded-sm font-bold',
                     speed === value
-                      ? 'bg-foreground text-background'
-                      : 'bg-background text-muted-foreground hover:bg-muted',
+                      ? 'bg-white text-indigo-600 shadow-sm border border-slate-200'
+                      : 'text-slate-500 hover:text-slate-800',
                   ].join(' ')}
                   aria-label={`Set speed to ${label}`}
                   aria-pressed={speed === value}
@@ -581,37 +608,6 @@ export function BusVisualizer({
         </div>
       )}
 
-      {/* ── Status footer ───────────────────────────────────────────────────── */}
-      <div className="text-xs font-mono text-muted-foreground space-y-0.5">
-        {hasTransactions ? (
-          <>
-            <div className="flex items-center gap-1.5">
-              <span
-                className={[
-                  'inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 transition-colors duration-300',
-                  playState === 'playing' && busStage !== 'idle' ? 'bg-emerald-500' :
-                  playState === 'paused'                         ? 'bg-amber-400'   :
-                                                                   'bg-muted-foreground/30',
-                ].join(' ')}
-              />
-              {playState === 'idle'    && 'Press Play to animate'}
-              {playState === 'playing' && (busStage === 'idle'
-                ? 'Starting…'
-                : (PHASE_STEPS.find((p) => p.stage === busStage)?.label ?? ''))}
-              {playState === 'paused'  && 'Paused — press Resume to continue'}
-              {playState === 'done'    && 'Animation complete'}
-            </div>
-            <div>
-              {activeTxType ? `Type: ${txLabel(activeTxType)}` : 'Type: —'}
-              {busTransactions[0]?.initiator !== undefined
-                ? ` | Initiator: Core ${busTransactions[0].initiator}`
-                : ''}
-            </div>
-          </>
-        ) : (
-          <div>No bus traffic for this step.</div>
-        )}
-      </div>
     </div>
   );
 }

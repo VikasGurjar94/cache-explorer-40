@@ -1,6 +1,5 @@
 import { ProtocolType } from '@/lib/simulator/types';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { RotateCcw } from 'lucide-react';
 
 interface SimulatorControlsProps {
@@ -19,64 +18,80 @@ export function SimulatorControls({
   onReset,
 }: SimulatorControlsProps) {
   return (
-    <div className="flex items-center gap-4 flex-wrap">
-      <div className="flex items-center gap-2">
-        <label className="text-xs font-mono text-muted-foreground">Protocol</label>
-        <Select value={protocol} onValueChange={(v) => onProtocolChange(v as ProtocolType)}>
-          <SelectTrigger className="w-28 font-mono text-sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="MSI" className="font-mono">MSI</SelectItem>
-            <SelectItem value="MESI" className="font-mono">MESI</SelectItem>
-            <SelectItem value="MOESI" className="font-mono">MOESI</SelectItem>
-          </SelectContent>
-        </Select>
+    <div className="space-y-6">
+      {/* Protocol Selection */}
+      <div className="space-y-2">
+        <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Protocol</label>
+        <div className="flex bg-muted/50 p-1 rounded-lg border border-border">
+          {['MSI', 'MESI', 'MOESI'].map((p) => (
+            <button
+              key={p}
+              onClick={() => onProtocolChange(p as ProtocolType)}
+              className={`flex-1 text-xs font-mono py-1.5 rounded-md transition-colors ${
+                protocol === p
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              }`}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <label className="text-xs font-mono text-muted-foreground">Cores</label>
-        <Select value={String(coreCount)} onValueChange={(v) => onCoreCountChange(parseInt(v))}>
-          <SelectTrigger className="w-16 font-mono text-sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="2" className="font-mono">2</SelectItem>
-            <SelectItem value="3" className="font-mono">3</SelectItem>
-            <SelectItem value="4" className="font-mono">4</SelectItem>
-          </SelectContent>
-        </Select>
+      {/* Core Count */}
+      <div className="space-y-2">
+        <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Cores</label>
+        <div className="flex gap-2">
+          {[2, 3, 4].map((c) => (
+            <button
+              key={c}
+              onClick={() => onCoreCountChange(c)}
+              className={`flex-1 text-xs font-mono py-1.5 rounded-md border transition-colors ${
+                coreCount === c
+                  ? 'bg-primary/10 border-primary text-foreground'
+                  : 'bg-background border-border text-muted-foreground hover:border-primary/50'
+              }`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <Button onClick={onReset} size="sm" variant="outline" className="gap-1 font-mono">
-        <RotateCcw className="h-3 w-3" /> Reset
+      <Button onClick={onReset} size="sm" variant="outline" className="w-full gap-2 font-mono">
+        <RotateCcw className="h-3.5 w-3.5" /> Force Reset
       </Button>
 
-      <div className="ml-auto flex items-center gap-2">
-        <span className="text-xs font-mono px-2 py-1 rounded bg-muted text-muted-foreground">
-          M
-        </span>
-        <span className="text-xs font-mono" style={{ color: 'hsl(0, 72%, 51%)' }}>Modified</span>
-        <span className="text-xs font-mono px-2 py-1 rounded bg-muted text-muted-foreground">
-          E
-        </span>
-        <span className="text-xs font-mono" style={{ color: 'hsl(142, 71%, 45%)' }}>Exclusive</span>
-        <span className="text-xs font-mono px-2 py-1 rounded bg-muted text-muted-foreground">
-          S
-        </span>
-        <span className="text-xs font-mono" style={{ color: 'hsl(217, 91%, 60%)' }}>Shared</span>
-        <span className="text-xs font-mono px-2 py-1 rounded bg-muted text-muted-foreground">
-          I
-        </span>
-        <span className="text-xs font-mono" style={{ color: 'hsl(220, 9%, 46%)' }}>Invalid</span>
-        {protocol === 'MOESI' && (
-          <>
-            <span className="text-xs font-mono px-2 py-1 rounded bg-muted text-muted-foreground">
-              O
-            </span>
-            <span className="text-xs font-mono" style={{ color: 'hsl(25, 95%, 53%)' }}>Owned</span>
-          </>
-        )}
+      {/* Legend */}
+      <div className="pt-4 border-t border-border">
+        <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3 leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 block">
+          State Legend
+        </label>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex items-center gap-2">
+            <span className="w-6 text-center text-[10px] font-mono py-0.5 rounded bg-muted">M</span>
+            <span className="text-xs font-mono text-red-600">Modified</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-6 text-center text-[10px] font-mono py-0.5 rounded bg-muted">E</span>
+            <span className="text-xs font-mono text-emerald-600">Exclusive</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-6 text-center text-[10px] font-mono py-0.5 rounded bg-muted">S</span>
+            <span className="text-xs font-mono text-blue-600">Shared</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-6 text-center text-[10px] font-mono py-0.5 rounded bg-muted">I</span>
+            <span className="text-xs font-mono text-slate-500">Invalid</span>
+          </div>
+          {protocol === 'MOESI' && (
+            <div className="flex items-center gap-2">
+              <span className="w-6 text-center text-[10px] font-mono py-0.5 rounded bg-muted">O</span>
+              <span className="text-xs font-mono text-amber-500">Owned</span>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
